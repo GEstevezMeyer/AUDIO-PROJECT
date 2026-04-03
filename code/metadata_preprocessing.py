@@ -36,7 +36,7 @@ def make_metadata(directory_data: str):
         audios = os.listdir(directory_data + "/" + label)
         for audio in audios: 
             df.loc[len(df)] = [audio, label, directory_data]
-    df = df.set_index("id_audio")
+
     return df
 
 if __name__ == "__main__":
