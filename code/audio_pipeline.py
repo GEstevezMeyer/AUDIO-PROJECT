@@ -7,6 +7,9 @@ import numpy as np
 import scipy.io as wavfile 
 from python_speech_features import mfcc, logfbank
 
+from numba import njit
+
+
 
 def main_process(directory_intrument:str):
     os.chdir(directory_intrument)
@@ -27,6 +30,18 @@ def main_sequential(directory_intrument: str):
     results = []
     for row in metadata.to_dict("records"):
         res = load_wavefile(row)
+        results.append(res)
+
+    os.chdir("../../")
+    return res
+
+def main_numba(directory_intrument: str):
+    os.chdir(directory_intrument)
+    metadata = load_metadata()
+
+    results = []
+    for row in metadata.to_dict("records"):
+        res = load_wavefile_numba(row)
         results.append(res)
 
     os.chdir("../../")
@@ -64,6 +79,32 @@ def load_wavefile(series:dict):
 
     return res
 
+
+def load_wavefile_numba(series:dict): 
+
+    path_file = create_path(series)
+    waveform, sample_rate = librosa.load(path= path_file,sr= 16000)
+    mask = enveloppe_numba(waveform,sample_rate)
+    waveform = waveform[mask]
+
+    magnitud,frequency = calc_fft(waveform,sample_rate)
+    bank = logfbank(waveform[:sample_rate],sample_rate,nfilt=26,nfft=1024).T
+    mel = mfcc(waveform[:sample_rate],sample_rate,numcep=13,nfilt=26,nfft=1024).T
+
+    res = {
+        "waveform": waveform,
+        "sample_rate": sample_rate,
+        "magnitud":magnitud,
+        "frequency": frequency,
+        "filterbank": bank,
+        "mel": mel,
+        "label": series["label"]
+    }
+
+    res = ((waveform,sample_rate),series["label"])
+
+    return res
+
 def create_path(row:pd.Series) -> str:
     return f"{row['Split']}/{row['label']}/{row['id_audio']}"
 
@@ -75,13 +116,13 @@ def calc_fft(signal,rate):
 
     return (magnitud,frequency)
 
-def enveloppe(waveform,sample_rate,treshold = 0.0005): 
+def enveloppe(waveform,sample_rate,threshold = 0.0005): 
     mask = []
     y = pd.Series(waveform).map(lambda x: np.abs(x))
     y_mean = y.rolling(window=int(sample_rate/10),min_periods=1,center=True).mean()
 
     for mean in y_mean: 
-        if mean > treshold: 
+        if mean > threshold: 
             mask.append(True)
         else: 
             mask.append(False)
@@ -89,19 +130,63 @@ def enveloppe(waveform,sample_rate,treshold = 0.0005):
     return mask
 
 
+@njit
+def enveloppe_numba(waveform, sample_rate, threshold=0.0005):
+    n = len(waveform)
+    window = sample_rate // 10
+    pad = window // 2
+
+    abs_wave = np.abs(waveform)
+
+    padded = np.empty(n + 2 * pad)
+    padded[pad:pad+n] = abs_wave
+
+
+    for i in range(pad):
+        padded[i] = abs_wave[0]
+        padded[pad+n+i] = abs_wave[-1]
+
+    mask = np.empty(n, dtype=np.bool_)
+
+    for i in range(n):
+        s = 0.0
+        for j in range(window):
+            s += padded[i + j]
+        mean = s / window
+        mask[i] = mean > threshold
+
+    return mask
+
+        
+
+
 if __name__ == "__main__": 
 
-    
+    if input("test numba: Y") == "Y":
+        start = time.time()
+        main_numba("DATA/GUITAR")
+        end = time.time()
 
-    start = time.time()
-    main_process("DATA/GUITAR")
-    end = time.time()
+        print(f"Time: {end - start:.4f} seconds")
 
-    print(f"Time: {end - start:.4f} seconds")
 
-    start = time.time()
-    main_sequential("DATA/GUITAR")
-    end = time.time()
+        start = time.time()
+        main_process("DATA/GUITAR")
+        end = time.time()
 
-    print(f"Time: {end - start:.4f} seconds")
+        print(f"Time: {end - start:.4f} seconds")
+
+
+    if input("test linear/threading: Y") == "Y": 
+        start = time.time()
+        main_process("DATA/GUITAR")
+        end = time.time()
+
+        print(f"Time: {end - start:.4f} seconds")
+
+        start = time.time()
+        main_sequential("DATA/GUITAR")
+        end = time.time()
+
+        print(f"Time: {end - start:.4f} seconds")
 
