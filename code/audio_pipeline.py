@@ -4,48 +4,55 @@ from multiprocessing import Pool, cpu_count
 import librosa
 import time 
 import numpy as np 
-import scipy.io as wavfile 
-from python_speech_features import mfcc, logfbank
+import tomllib
+from functools import partial
+import tensorflow as tf 
 
-from numba import njit
 
+
+def import_config(path:str) -> dict: 
+    with open(path, "rb") as r:
+        config = tomllib.load(r)["config"]
+
+    return config 
 
 
 def main_process(directory_intrument:str):
+    config = import_config("code/config.toml")
+
     os.chdir(directory_intrument)
     metadata = load_metadata()
+    func = partial(load_wavefile, config=config)
 
     
     with Pool(cpu_count()) as p: 
-        p.map(load_wavefile,metadata.to_dict("records"))
+        res = p.map(func,metadata.to_dict("records"))
+    
+    x, y, split = zip(*res)
+
+    x = np.array(x)
+    y = np.array(y)
+    split = np.array(split)
+   
+    train_mask = split == "TRAINING"
+    test_mask  = split == "TEST"
+
+    x_train = x[train_mask]
+    y_train = y[train_mask]
+
+    x_test = x[test_mask]
+    y_test = y[test_mask]
+
+    train_ds = tf.data.Dataset.from_tensor_slices((list(x_train), list(y_train)))
+    test_ds  = tf.data.Dataset.from_tensor_slices((list(x_test), list(y_test)))
+
+    train_ds = train_ds.shuffle(buffer_size=1000).batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
+    test_ds = test_ds.batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
+
+
 
     os.chdir("../../")
-
-    return p
-
-def main_sequential(directory_intrument: str):
-    os.chdir(directory_intrument)
-    metadata = load_metadata()
-
-    results = []
-    for row in metadata.to_dict("records"):
-        res = load_wavefile(row)
-        results.append(res)
-
-    os.chdir("../../")
-    return res
-
-def main_numba(directory_intrument: str):
-    os.chdir(directory_intrument)
-    metadata = load_metadata()
-
-    results = []
-    for row in metadata.to_dict("records"):
-        res = load_wavefile_numba(row)
-        results.append(res)
-
-    os.chdir("../../")
-    return res
+    return x_train,y_train,x_test,y_test,
 
 
 def load_metadata() -> pd.DataFrame: 
@@ -54,67 +61,39 @@ def load_metadata() -> pd.DataFrame:
     
     return df 
 
-def load_wavefile(series:dict): 
+def load_wavefile(series:dict,config:dict): 
 
     path_file = create_path(series)
-    waveform, sample_rate = librosa.load(path= path_file,sr= 16000)
-    mask = enveloppe(waveform,sample_rate)
+
+    waveform, sample_rate = librosa.load(path=path_file, sr=16000)
+
+    mask = enveloppe(waveform, sample_rate)
     waveform = waveform[mask]
+    waveform = pad_waveform(waveform, config["target_length"])
 
-    magnitud,frequency = calc_fft(waveform,sample_rate)
-    bank = logfbank(waveform[:sample_rate],sample_rate,nfilt=26,nfft=1024).T
-    mel = mfcc(waveform[:sample_rate],sample_rate,numcep=13,nfilt=26,nfft=1024).T
+    mel_spectrogram = librosa.feature.melspectrogram(
+        y=waveform,
+        sr=sample_rate,
+        n_fft=config["nfft"],
+        hop_length=config["hop_length"],
+        n_mels=config["nmels"]
+    )
 
-    res = {
-        "waveform": waveform,
-        "sample_rate": sample_rate,
-        "magnitud":magnitud,
-        "frequency": frequency,
-        "filterbank": bank,
-        "mel": mel,
-        "label": series["label"]
-    }
+    mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
-    res = ((waveform,sample_rate),series["label"])
-
-    return res
+    x = mel_spectrogram
+    y = series["label"]
+    split = series["Split"]
 
 
-def load_wavefile_numba(series:dict): 
 
-    path_file = create_path(series)
-    waveform, sample_rate = librosa.load(path= path_file,sr= 16000)
-    mask = enveloppe_numba(waveform,sample_rate)
-    waveform = waveform[mask]
+    
+    return x,y,split 
 
-    magnitud,frequency = calc_fft(waveform,sample_rate)
-    bank = logfbank(waveform[:sample_rate],sample_rate,nfilt=26,nfft=1024).T
-    mel = mfcc(waveform[:sample_rate],sample_rate,numcep=13,nfilt=26,nfft=1024).T
 
-    res = {
-        "waveform": waveform,
-        "sample_rate": sample_rate,
-        "magnitud":magnitud,
-        "frequency": frequency,
-        "filterbank": bank,
-        "mel": mel,
-        "label": series["label"]
-    }
-
-    res = ((waveform,sample_rate),series["label"])
-
-    return res
 
 def create_path(row:pd.Series) -> str:
     return f"{row['Split']}/{row['label']}/{row['id_audio']}"
-
-
-def calc_fft(signal,rate): 
-    n = len(signal)
-    frequency = np.fft.rfftfreq(n,d= 1/rate)
-    magnitud = np.abs(np.fft.rfft(signal)/n)
-
-    return (magnitud,frequency)
 
 def enveloppe(waveform,sample_rate,threshold = 0.0005): 
     mask = []
@@ -129,64 +108,22 @@ def enveloppe(waveform,sample_rate,threshold = 0.0005):
 
     return mask
 
-
-@njit
-def enveloppe_numba(waveform, sample_rate, threshold=0.0005):
-    n = len(waveform)
-    window = sample_rate // 10
-    pad = window // 2
-
-    abs_wave = np.abs(waveform)
-
-    padded = np.empty(n + 2 * pad)
-    padded[pad:pad+n] = abs_wave
+def pad_waveform(waveform, target_length):
+    if len(waveform) < target_length:
+        pad_width = target_length - len(waveform)
+        waveform = np.pad(waveform, (0, pad_width), mode='constant')
+    else:
+        waveform = waveform[:target_length]
+    return waveform
 
 
-    for i in range(pad):
-        padded[i] = abs_wave[0]
-        padded[pad+n+i] = abs_wave[-1]
 
-    mask = np.empty(n, dtype=np.bool_)
-
-    for i in range(n):
-        s = 0.0
-        for j in range(window):
-            s += padded[i + j]
-        mean = s / window
-        mask[i] = mean > threshold
-
-    return mask
-
-        
 
 
 if __name__ == "__main__": 
+    x,y,_,_ = main_process("DATA/GUITAR")
 
-    if input("test numba: Y") == "Y":
-        start = time.time()
-        main_numba("DATA/GUITAR")
-        end = time.time()
+    print(x.shape,y.shape)
 
-        print(f"Time: {end - start:.4f} seconds")
-
-
-        start = time.time()
-        main_process("DATA/GUITAR")
-        end = time.time()
-
-        print(f"Time: {end - start:.4f} seconds")
-
-
-    if input("test linear/threading: Y") == "Y": 
-        start = time.time()
-        main_process("DATA/GUITAR")
-        end = time.time()
-
-        print(f"Time: {end - start:.4f} seconds")
-
-        start = time.time()
-        main_sequential("DATA/GUITAR")
-        end = time.time()
-
-        print(f"Time: {end - start:.4f} seconds")
+    
 

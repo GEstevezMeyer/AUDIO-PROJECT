@@ -1,0 +1,8 @@
+[config]
+mode = "conv"
+target_length = 16000
+nfft = 1024
+rate = 16000 
+hop_length = 512
+nmels = 10
+batch_size = 10
