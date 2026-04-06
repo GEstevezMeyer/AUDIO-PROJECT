@@ -4,7 +4,7 @@
 
 
 
-# Data-SOurce
+# Data-Source
 
 - Vinci, F. (2019). Guitar Chords V2 [Data set]. Kaggle. https://www.kaggle.com/datasets/fabianavinci/guitar-chords-v2
 - Adams, S. [Seth Adams]. (2025). Deep learning for audio classification [Playlist]. YouTube. https://www.youtube.com/playlist?list=PLhA3b2k8R3t2Ng1WW_7MiXeh1pfQJQi_P
