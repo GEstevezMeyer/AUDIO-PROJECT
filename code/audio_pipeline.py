@@ -1,5 +1,6 @@
 import pandas as pd 
 import os 
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 from multiprocessing import Pool, cpu_count, Queue , Process
 import librosa
 import time 
@@ -10,6 +11,7 @@ import tensorflow as tf
 from numba import njit, prange
 
 
+
 def import_config(path:str) -> dict: 
     with open(path, "rb") as r:
         config = tomllib.load(r)["config"]
@@ -18,17 +20,20 @@ def import_config(path:str) -> dict:
 
 
 def main_process(directory_intrument:str,config_path:str = "code/config.toml"):
+
     config = import_config(config_path)
+    
 
     os.chdir(directory_intrument)
     metadata = load_metadata()
     func = partial(load_wavefile, config=config)
 
     
-    with Pool(cpu_count()) as p: 
-        res = p.map(func,metadata.to_dict("records"))
+    with Pool(cpu_count()) as p:
+        res = p.map(func, metadata.to_dict("records"))
     
     x, y, split = zip(*res)
+    n_label = len(list(set(y))) 
 
     x = np.array(x)
     y = np.array(y)
@@ -44,6 +49,10 @@ def main_process(directory_intrument:str,config_path:str = "code/config.toml"):
    
     x,y = organize_queue_outputs(queue)
 
+    
+
+    input_shape = x.shape[1::]
+
     train_mask = split == "TRAINING"
     test_mask  = split == "TEST"
 
@@ -57,6 +66,8 @@ def main_process(directory_intrument:str,config_path:str = "code/config.toml"):
     x_test = x[test_mask]
     y_test = y[test_mask]
 
+    
+
     train_ds = tf.data.Dataset.from_tensor_slices((list(x_train), list(y_train)))
     test_ds  = tf.data.Dataset.from_tensor_slices((list(x_test), list(y_test)))
 
@@ -66,7 +77,7 @@ def main_process(directory_intrument:str,config_path:str = "code/config.toml"):
     
 
     os.chdir("../../")
-    return train_ds,test_ds
+    return train_ds,test_ds,n_label,input_shape
 
 
 def load_metadata() -> pd.DataFrame: 
@@ -79,7 +90,7 @@ def load_metadata() -> pd.DataFrame:
 
 
 def clean_y(y:np.array,queue:Queue)-> np.array:
-    unique_label = list(set(y))
+    unique_label = sorted(list(set(y))) 
     indices_label = {unique_label[i]:i for i in range(len(unique_label))}
     y_int = np.array([indices_label[x] for x in y], dtype=np.int32)
     n_classes = len(unique_label)
@@ -92,6 +103,8 @@ def clean_x(x:np.array,queue:Queue):
     x_max = x.max()
 
     x = (x-x_min)/(x_max-x_min)
+
+    x = x.reshape(x.shape[0],x.shape[1],x.shape[2],1)
 
     queue.put(("x",x))
 
