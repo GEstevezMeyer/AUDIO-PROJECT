@@ -1,13 +1,13 @@
 import pandas as pd 
 import os 
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Queue , Process
 import librosa
 import time 
 import numpy as np 
 import tomllib
 from functools import partial
 import tensorflow as tf 
-
+from numba import njit, prange
 
 
 def import_config(path:str) -> dict: 
@@ -17,8 +17,8 @@ def import_config(path:str) -> dict:
     return config 
 
 
-def main_process(directory_intrument:str):
-    config = import_config("code/config.toml")
+def main_process(directory_intrument:str,config_path:str = "code/config.toml"):
+    config = import_config(config_path)
 
     os.chdir(directory_intrument)
     metadata = load_metadata()
@@ -33,12 +33,26 @@ def main_process(directory_intrument:str):
     x = np.array(x)
     y = np.array(y)
     split = np.array(split)
+
+    queue = Queue()
+
+    px = Process(target=clean_x,args=(x,queue))
+    py = Process(target= clean_y, args=(y,queue))
+
+    px.start()
+    py.start()
    
+    x,y = organize_queue_outputs(queue)
+
     train_mask = split == "TRAINING"
     test_mask  = split == "TEST"
 
     x_train = x[train_mask]
     y_train = y[train_mask]
+
+    
+    print(x_train.shape)
+    print(y_train.shape)
 
     x_test = x[test_mask]
     y_test = y[test_mask]
@@ -49,10 +63,10 @@ def main_process(directory_intrument:str):
     train_ds = train_ds.shuffle(buffer_size=1000).batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
     test_ds = test_ds.batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
 
-
+    
 
     os.chdir("../../")
-    return x_train,y_train,x_test,y_test,
+    return train_ds,test_ds
 
 
 def load_metadata() -> pd.DataFrame: 
@@ -60,6 +74,57 @@ def load_metadata() -> pd.DataFrame:
     df = pd.read_csv(f"metadata_{instrument_name}.csv")
     
     return df 
+
+
+
+
+def clean_y(y:np.array,queue:Queue)-> np.array:
+    unique_label = list(set(y))
+    indices_label = {unique_label[i]:i for i in range(len(unique_label))}
+    y_int = np.array([indices_label[x] for x in y], dtype=np.int32)
+    n_classes = len(unique_label)
+    y = one_hot_numba(y_int,n_classes)
+    
+    queue.put(("y",y))
+
+def clean_x(x:np.array,queue:Queue):
+    x_min = x.min()
+    x_max = x.max()
+
+    x = (x-x_min)/(x_max-x_min)
+
+    queue.put(("x",x))
+
+def organize_queue_outputs(queue: Queue) -> tuple: 
+    finish = False
+    number_of_item_found = 0
+    x = None
+    y = None
+
+    while not finish: 
+        item = queue.get()
+        if item is not None: 
+            if item[0] == "x": 
+                x = item[1]
+            else: 
+                y = item[1]
+            number_of_item_found+= 1
+        
+        if number_of_item_found == 2: 
+            finish = True
+
+    return x,y 
+
+@njit(parallel=True )
+def one_hot_numba(y_int, n_classes):
+    m = len(y_int)
+    res = np.zeros((m, n_classes), dtype=np.int32)
+    
+    for i in range(m):
+        res[i, y_int[i]] = 1
+        
+    return res
+
 
 def load_wavefile(series:dict,config:dict): 
 
@@ -121,9 +186,6 @@ def pad_waveform(waveform, target_length):
 
 
 if __name__ == "__main__": 
-    x,y,_,_ = main_process("DATA/GUITAR")
-
-    print(x.shape,y.shape)
-
+    print(main_process("DATA/GUITAR"))
     
 
