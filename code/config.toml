@@ -1,9 +1,0 @@
-[config]
-mode = "conv"
-target_length = 48000     
-nfft = 1024
-hop_length = 512
-nmels = 40
-batch_size = 32
-[parameters]
-epochs = 50
