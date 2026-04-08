@@ -39,6 +39,9 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     y = np.array(y)
     split = np.array(split)
 
+    if config["divide_4"] == True: 
+        x,y,split = divide_data(x,y,split)
+
     queue = Queue()
 
     px = Process(target=clean_x,args=(x,queue))
@@ -88,6 +91,24 @@ def load_metadata() -> pd.DataFrame:
 
 
 
+def divide_data(x:np.array,y:np.array,split:np.array) -> tuple: 
+    
+    new_x = []
+    new_y = []
+    new_split = []
+
+    for xi, yi, si in zip(x, y, split):
+        parts = np.array_split(xi, 4)  
+        
+        new_x.extend(parts)
+        new_y.extend([yi]*4)
+        new_split.extend([si]*4)
+
+    x = np.array(new_x)
+    y = np.array(new_y)
+    split = np.array(new_split)
+
+    return x,y,split
 
 def clean_y(y:np.array,queue:Queue)-> np.array:
     unique_label = sorted(list(set(y))) 
@@ -105,7 +126,6 @@ def clean_x(x:np.array,queue:Queue):
     x = (x-x_min)/(x_max-x_min)
 
     x = x.reshape(x.shape[0],x.shape[1],x.shape[2],1)
-
     queue.put(("x",x))
 
 def organize_queue_outputs(queue: Queue) -> tuple: 
