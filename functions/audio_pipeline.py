@@ -42,34 +42,36 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     if config["divide_4"] == True: 
         x,y,split = divide_data(x,y,split)
 
-    queue = Queue()
-
-    px = Process(target=clean_x,args=(x,queue))
-    py = Process(target= clean_y, args=(y,queue))
-
-    px.start()
-    py.start()
-   
-    x,y = organize_queue_outputs(queue)
-
-    
-
     input_shape = x.shape[1::]
 
     train_mask = split == "TRAINING"
     test_mask  = split == "TEST"
+    valTrue_mask = split == "VAL_REAL"
 
     x_train = x[train_mask]
-    y_train = y[train_mask]
-
-    
-    print(x_train.shape)
-    print(y_train.shape)
-
     x_test = x[test_mask]
-    y_test = y[test_mask]
+    x_valTrue = x[valTrue_mask]
 
+    x = (x_train,x_test,x_valTrue)
+
+    with Pool(3) as p:
+        res = p.map(clean_x, x)
+
+    x_train,x_test,x_valTrue = res
+
+    y_train = y[train_mask]
+    y_test = y[test_mask]
+    y_valTrue = y[valTrue_mask]
+
+    y = (y_test,y_train,y_valTrue)
     
+    with Pool(3) as p:
+        res = p.map(clean_y, y)
+
+    y_test,y_train,y_valTrue = res
+
+    print(y_train.shape,x_train.shape)
+     
 
     train_ds = tf.data.Dataset.from_tensor_slices((list(x_train), list(y_train)))
     test_ds  = tf.data.Dataset.from_tensor_slices((list(x_test), list(y_test)))
@@ -110,23 +112,23 @@ def divide_data(x:np.array,y:np.array,split:np.array) -> tuple:
 
     return x,y,split
 
-def clean_y(y:np.array,queue:Queue)-> np.array:
+def clean_y(y:np.array)-> np.array:
     unique_label = sorted(list(set(y))) 
     indices_label = {unique_label[i]:i for i in range(len(unique_label))}
     y_int = np.array([indices_label[x] for x in y], dtype=np.int32)
     n_classes = len(unique_label)
     y = one_hot_numba(y_int,n_classes)
     
-    queue.put(("y",y))
+    return y 
 
-def clean_x(x:np.array,queue:Queue):
+def clean_x(x:np.array):
     x_min = x.min()
     x_max = x.max()
 
     x = (x-x_min)/(x_max-x_min)
 
     x = x.reshape(x.shape[0],x.shape[1],x.shape[2],1)
-    queue.put(("x",x))
+    return x
 
 def organize_queue_outputs(queue: Queue) -> tuple: 
     finish = False
@@ -148,7 +150,7 @@ def organize_queue_outputs(queue: Queue) -> tuple:
 
     return x,y 
 
-@njit(parallel=True )
+@njit(parallel=True)
 def one_hot_numba(y_int, n_classes):
     m = len(y_int)
     res = np.zeros((m, n_classes), dtype=np.int32)
@@ -164,6 +166,8 @@ def load_wavefile(series:dict,config:dict):
     path_file = create_path(series)
 
     waveform, sample_rate = librosa.load(path=path_file, sr=16000)
+
+    waveform,_ = librosa.effects.hpss(waveform)
 
     mask = enveloppe(waveform, sample_rate)
     waveform = waveform[mask]

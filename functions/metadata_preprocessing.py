@@ -22,10 +22,11 @@ def make_instrument_metadata(directory_instrument: str):
         if element != f"metadata_{directory_instrument}.csv": 
             sets.append(element)
     
-    with Pool(2) as p:
+    
+    with Pool(3) as p:
         dfs = p.map(make_metadata, sets)
 
-    df = pd.concat([dfs[0], dfs[1]])
+    df = pd.concat([dfs[0], dfs[1],dfs[2]])
     df.to_csv(f"metadata_{directory_instrument}.csv",index= False)
     os.chdir("../")
 

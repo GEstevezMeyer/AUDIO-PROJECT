@@ -19,7 +19,7 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
     parameters = import_parameters(config_path)
     config = import_config(config_path)
     train_dataset,val_dataset,n_label,input_shape = main_process(data_path)
-    model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"])
+    model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"])
 
     with mlflow.start_run(): 
 
@@ -45,7 +45,7 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
 
 
 
-def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer:int = 3,filter_start:int = 16,step_size:int = 16)-> tf.keras.Sequential: 
+def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer:int = 3,filter_start:int = 16,step_size:int = 16,max_pooling:bool = True)-> tf.keras.Sequential: 
     
     model = tf.keras.Sequential()
 
@@ -55,8 +55,8 @@ def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer
         filters = filter_start + i*step_size
         model.add(tf.keras.layers.Conv2D(filters,(3,3), activation="relu", strides=(1,1), padding="same"))
 
-    model.add(tf.keras.layers.MaxPool2D((2,2)))
-
+    if max_pooling:
+        model.add(tf.keras.layers.MaxPool2D((2,2)))
     model.add(tf.keras.layers.Dropout(0.5))
     model.add(tf.keras.layers.Flatten())
 
