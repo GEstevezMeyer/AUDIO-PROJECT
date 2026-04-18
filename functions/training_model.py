@@ -9,6 +9,10 @@ import matplotlib as plt
 import tomllib 
 import numpy as np 
 import mlflow 
+from keras import regularizers
+from multiprocessing import Pool,cpu_count
+from audio_pipeline import clean_x
+from functools import partial
 
 
 def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flow_url:str = "http://localhost:5000",experiment_name = "AUDIO_CNN"):
@@ -18,8 +22,15 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
 
     parameters = import_parameters(config_path)
     config = import_config(config_path)
-    train_dataset,val_dataset,n_label,input_shape = main_process(data_path)
-    model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"])
+    train_dataset,val_dataset,n_label,input_shape,valTest_df = main_process(data_path)
+    model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"],parameters["type_of_regulizer"])
+
+    testing_x = valTest_df[0]
+    testing_y = valTest_df[1]
+
+    print("Testing:")
+    print(testing_x.shape)
+    print(testing_y.shape)
 
     with mlflow.start_run(): 
 
@@ -39,17 +50,23 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
                 step=epoch
             )
         
+        AccvalTesting = compute_testing_accuracy(testing_x,testing_y,model)
+
+        mlflow.log_metric("test_acc",AccvalTesting)
+        
+        
     
     return model,metrics 
     
 
 
 
-def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer:int = 3,filter_start:int = 16,step_size:int = 16,max_pooling:bool = True)-> tf.keras.Sequential: 
+def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer:int = 3,filter_start:int = 16,step_size:int = 16,max_pooling:bool = True,regularizer_type = "l1")-> tf.keras.Sequential: 
     
     model = tf.keras.Sequential()
 
     model.add(tf.keras.layers.Input(shape=input_shape))
+
 
     for i in  range (number_of_conv_layer):
         filters = filter_start + i*step_size
@@ -60,7 +77,8 @@ def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer
     model.add(tf.keras.layers.Dropout(0.5))
     model.add(tf.keras.layers.Flatten())
 
-    model.add(tf.keras.layers.Dense(32, activation="relu"))
+     
+    model.add(tf.keras.layers.Dense(32, activation="relu",kernel_regularizer=regularizer_type)) 
     model.add(tf.keras.layers.Dense(number_of_label, activation="softmax"))
 
 
@@ -106,6 +124,29 @@ def predict_chord(model,wave_file_path:str,config_path = "functions/config.toml"
     res = model.predict(x)
     
     return res 
+
+
+def compute_accuracy_error(predict_value: np.array, y_label: np.array) -> int:
+    index_predict_value_max = np.argmax(predict_value)
+    y_index = np.argmax(y_label)
+    return int(y_index == index_predict_value_max)
+
+
+
+
+
+def compute_testing_accuracy(testing_dataset: np.array, testing_label: np.array, model) -> float:
+    predictions = model.predict(testing_dataset)
+
+    n = len(testing_dataset)
+
+    res = 0
+    for i in range(n):
+        res += compute_accuracy_error(predictions[i], testing_label[i])
+
+    return res / n 
+        
+            
 
   
 if __name__ == "__main__":  

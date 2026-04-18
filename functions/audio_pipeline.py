@@ -1,7 +1,7 @@
 import pandas as pd 
 import os 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-from multiprocessing import Pool, cpu_count, Queue , Process
+from multiprocessing import Pool, cpu_count
 import librosa
 import time 
 import numpy as np 
@@ -42,7 +42,7 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     if config["divide_4"] == True: 
         x,y,split = divide_data(x,y,split)
 
-    input_shape = x.shape[1::]
+    input_shape = (x.shape[1],x.shape[2],1)
 
     train_mask = split == "TRAINING"
     test_mask  = split == "TEST"
@@ -70,7 +70,10 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
 
     y_test,y_train,y_valTrue = res
 
+    print("training")
     print(y_train.shape,x_train.shape)
+
+    valTesting_df = (x_valTrue,y_valTrue)
      
 
     train_ds = tf.data.Dataset.from_tensor_slices((list(x_train), list(y_train)))
@@ -80,9 +83,11 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     test_ds = test_ds.batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
 
     
+    print(input_shape)
+
 
     os.chdir("../../")
-    return train_ds,test_ds,n_label,input_shape
+    return train_ds,test_ds,n_label,input_shape,valTesting_df
 
 
 def load_metadata() -> pd.DataFrame: 
@@ -128,27 +133,9 @@ def clean_x(x:np.array):
     x = (x-x_min)/(x_max-x_min)
 
     x = x.reshape(x.shape[0],x.shape[1],x.shape[2],1)
+
     return x
 
-def organize_queue_outputs(queue: Queue) -> tuple: 
-    finish = False
-    number_of_item_found = 0
-    x = None
-    y = None
-
-    while not finish: 
-        item = queue.get()
-        if item is not None: 
-            if item[0] == "x": 
-                x = item[1]
-            else: 
-                y = item[1]
-            number_of_item_found+= 1
-        
-        if number_of_item_found == 2: 
-            finish = True
-
-    return x,y 
 
 @njit(parallel=True)
 def one_hot_numba(y_int, n_classes):
