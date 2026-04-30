@@ -12,10 +12,13 @@ from audio_pipeline import enveloppe,pad_waveform
 mlflow.set_tracking_uri("http://localhost:5000")
 
 class Rotation_Matrix:
-    def __init__(self):
+    def __init__(self,q_tempos:Queue,clock):
         self._theta = 0.0
         self._inverse = False
         self._amount = 0.05
+        self._queue = q_tempos
+        self._k = 0.25
+        self._clock = clock
 
     @property
     def matrix(self):
@@ -29,7 +32,20 @@ class Rotation_Matrix:
 
 
     def add_theta(self):
-        self._theta += self._amount
+        self.theta += self.amount
+
+    def update_amount(self):
+        if not self._queue.empty():
+            tempo,_ = self._queue.get()
+            if type(tempo) == np.ndarray : 
+                tempo = np.mean(tempo)
+            fps = self._clock.get_fps()
+            if fps == 0:
+                fps = 20
+            if fps > 20:
+                fps = 20
+            self.amount = ((np.pi*2*tempo)/(60*fps))*self._k
+            print(self.amount)
 
 
     @property
@@ -44,11 +60,12 @@ class Rotation_Matrix:
     @property
     def amount(self):
         return self._amount
-
+    
     @amount.setter
-    def amount(self, value):
-        if 0 < value < np.pi:
-            self._amount = float(value)
+    def amount(self,value):
+        self._amount = value
+
+    
 
 
     @property
@@ -60,9 +77,11 @@ class Rotation_Matrix:
         self._inverse = bool(value)
 
 class Colors:
-    def __init__(self):
+    def __init__(self,q_tempos:Queue):
         self._screen = [0, 0, 0]
         self._dots = [255, 255, 255]
+        self._queue = q_tempos
+        self._tempo = 60/128
 
     @property
     def screen(self):
@@ -70,15 +89,23 @@ class Colors:
 
     @screen.setter
     def screen(self, new_screen: list):
-        self._screen = self._fix_rgb(new_screen)
+        self._screen = self.fix_rgb(new_screen)
 
     @property
     def dots(self):
         return tuple(self._dots)
-
+    
     @dots.setter
     def dots(self, new_dots: list):
         self._dots = self.fix_rgb(new_dots)
+
+    @property
+    def tempo(self):
+        return self._tempo
+    
+    @tempo.setter
+    def tempo(self,value):
+        self._tempo = value
 
     @staticmethod
     def fix_rgb(values):
@@ -90,6 +117,19 @@ class Colors:
 
         return values
 
+    def flash_screen(self,value):
+        if self.tempo <= value and self.tempo != 0:
+            return True
+
+        return False
+    
+    def update_tempo(self):
+        if not self._queue.empty():
+            x,_ = self._queue.get()
+            x = float(np.squeeze(x))
+            
+            self.tempo = 60/x
+            
     
 
 class Projector():
@@ -99,7 +139,7 @@ class Projector():
         self._scale = 200
         self._d = 3
 
-    def project(self,point):
+    def project(self,point:list) -> tuple:
         x, y, z = point
         factor = self.scale / (z + self.d)
         x2d = int(x * factor + self.width // 2)
@@ -117,11 +157,8 @@ class Projector():
 
     @scale.setter
     def scale(self,amount:float):
-        if amount >= 1000:
+        if amount >= 1000 or amount <= 200:
             self._scale = 300
-        elif amount <= 0:
-            self._scale = 700
-        
         self._scale = amount
 
     @d.setter
@@ -129,7 +166,7 @@ class Projector():
         if amount <= 0 or amount >= 13:
             self._d = 3
 
-        self._d = 3
+        self._d = amount
 
     @property
     def width(self): 
@@ -140,7 +177,7 @@ class Projector():
         return self._height
 
 
-    
+
     
 
     
@@ -193,13 +230,18 @@ def is_silence(data, threshold=200):
     rms = np.sqrt(np.mean(data**2))
     return rms < threshold
 
-def process_micro(q, config: dict, model):
+def process_micro(q,q_tempos, config: dict, model):
     stream_object,audio = create_microfone_object(config)
     while True:
         
         data = stream_object.read(config["target_length"], exception_on_overflow=False)
         data = np.frombuffer(data, dtype=np.int32).astype(np.float32)
         waveform = np.nan_to_num(data,nan=0).copy()
+
+        tempo, beat_times = librosa.beat.beat_track(y=waveform,sr = 16000,hop_length=config["hop_length"])
+
+
+        q_tempos.put((tempo,beat_times))
 
         mask = enveloppe(waveform, 16000)
         waveform = waveform[mask]
@@ -252,30 +294,46 @@ if __name__ == "__main__":
         "models:/m-84367e9851634dcfb484ce4d1742e2e8"
     )
 
+    WIDTH = 800
+    HEIGHT = 600
+    RADIUS = 2
+    FRAME_LIMITS = 20
+    DT = 1/FRAME_LIMITS
+    time = 0
+ 
     q = Queue()
-    p = Process(target=process_micro,args=(q,config,model),daemon=True)
+    q_tempos = Queue()
+    p = Process(target=process_micro,args=(q,q_tempos,config,model),daemon=True)
     p.start()
 
 
     pygame.init()
-
-    WIDTH = 800
-    HEIGHT = 600
-    RADIUS = 2
-    
-    
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+   
     clock = pygame.time.Clock()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
     running = True
     
 
-    GameColors = Colors()
-    RotationMatrix = Rotation_Matrix()
+    
+    GameColors = Colors(q_tempos)
+    RotationMatrix = Rotation_Matrix(q_tempos,clock)
     Proj = Projector(WIDTH,HEIGHT)
-
-    M = create_matrix_points(200,RADIUS,0.01)
+    M = create_matrix_points(100,RADIUS,0.01)
     
     while running: 
+        time+= DT
+        flashScreenFlag = GameColors.flash_screen(time)
+
+    
+        
+        if flashScreenFlag:
+            time-= GameColors.tempo
+            GameColors.screen = [128,128,128]
+            
+        else:
+            GameColors.screen = [0,0,0]
+
+
         screen.fill(GameColors.screen)
 
         for event in pygame.event.get():
@@ -302,14 +360,16 @@ if __name__ == "__main__":
                     Proj.scale-=100
                     M = add_point(M,RADIUS)
                 case 5: 
-                    RotationMatrix.theta+=0.1
+                    M = create_matrix_points(200,RADIUS)
                 case 6:
-                    RotationMatrix.theta-=0.1
+                    M = create_matrix_points(100,RADIUS)
                 case 7:
                     Proj.scale+=100
                     M = add_point(M,RADIUS)
 
 
+        GameColors.update_tempo()
+        RotationMatrix.update_amount()
         RotationMatrix.add_theta()
 
         R = RotationMatrix.matrix
@@ -322,7 +382,7 @@ if __name__ == "__main__":
             pygame.draw.circle(screen, GameColors.dots, (x, y), 2)
 
         pygame.display.flip()
-        clock.tick(20)
+        clock.tick(FRAME_LIMITS)
 
         
 
