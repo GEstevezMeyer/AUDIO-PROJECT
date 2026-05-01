@@ -65,8 +65,6 @@ class Rotation_Matrix:
     def amount(self,value):
         self._amount = value
 
-    
-
 
     @property
     def inverse(self):
@@ -77,11 +75,20 @@ class Rotation_Matrix:
         self._inverse = bool(value)
 
 class Colors:
-    def __init__(self,q_tempos:Queue):
-        self._screen = [0, 0, 0]
-        self._dots = [255, 255, 255]
+    def __init__(self,screen,targetScreen,q_tempos:Queue):
+        self._screen = screen
+        self._targetScreen = targetScreen
+        self._flash = (255,255,255)
         self._queue = q_tempos
         self._tempo = 60/128
+
+    @property
+    def targetScreen(self):
+        return self._targetScreen
+    
+    @targetScreen.setter
+    def targetScreen(self,new_screen:list):
+        self._targetScreen = tuple(self.fix_rgb(new_screen))
 
     @property
     def screen(self):
@@ -89,15 +96,15 @@ class Colors:
 
     @screen.setter
     def screen(self, new_screen: list):
-        self._screen = self.fix_rgb(new_screen)
+        self._screen = tuple(self.fix_rgb(new_screen))
 
     @property
-    def dots(self):
-        return tuple(self._dots)
+    def flash(self):
+        return tuple(self._flash)
     
-    @dots.setter
-    def dots(self, new_dots: list):
-        self._dots = self.fix_rgb(new_dots)
+    @flash.setter
+    def flash(self, new_dots: list):
+        self._flash = tuple(self.fix_rgb(new_dots))
 
     @property
     def tempo(self):
@@ -130,7 +137,7 @@ class Colors:
             
             self.tempo = 60/x
             
-    
+
 
 class Projector():
     def __init__(self,width,height):
@@ -138,6 +145,7 @@ class Projector():
         self._height = height
         self._scale = 200
         self._d = 3
+        self._targetScale = 200
 
     def project(self,point:list) -> tuple:
         x, y, z = point
@@ -146,6 +154,24 @@ class Projector():
         y2d = int(-y * factor + self.height // 2)
         return x2d, y2d
     
+    def update_scale(self):
+        if self.scale != self.targetScale:
+            if self.scale > self.targetScale:
+                self.scale-= 20
+            else:
+                self.scale+= 20
+    
+
+    @property
+    def targetScale(self):
+        return self._targetScale
+    
+    @targetScale.setter
+    def targetScale(self,amount): 
+        if amount >= 1000 or amount <= 200:
+            self._targetScale = 300
+        else:
+            self._targetScale = amount
 
     @property
     def scale(self):
@@ -159,7 +185,8 @@ class Projector():
     def scale(self,amount:float):
         if amount >= 1000 or amount <= 200:
             self._scale = 300
-        self._scale = amount
+        else:
+            self._scale = amount
 
     @d.setter
     def d(self,amount):
@@ -178,7 +205,13 @@ class Projector():
 
 
 
-    
+def generator_rgb_effect(start_color:list , end_color:list,steps:int):
+    r = np.linspace(start_color[0],end_color[0],steps)
+    g = np.linspace(start_color[1],end_color[1],steps)
+    b = np.linspace(start_color[2],end_color[2],steps)
+    for i in range(steps):
+        yield (r[i],g[i],b[i])
+
 
     
 
@@ -230,7 +263,7 @@ def is_silence(data, threshold=200):
     rms = np.sqrt(np.mean(data**2))
     return rms < threshold
 
-def process_micro(q,q_tempos, config: dict, model):
+def process_micro(q,q_tempos_color,q_tempos_rotation,config: dict, model):
     stream_object,audio = create_microfone_object(config)
     while True:
         
@@ -241,7 +274,8 @@ def process_micro(q,q_tempos, config: dict, model):
         tempo, beat_times = librosa.beat.beat_track(y=waveform,sr = 16000,hop_length=config["hop_length"])
 
 
-        q_tempos.put((tempo,beat_times))
+        q_tempos_color.put((tempo,beat_times))
+        q_tempos_rotation.put((tempo,beat_times))
 
         mask = enveloppe(waveform, 16000)
         waveform = waveform[mask]
@@ -302,8 +336,9 @@ if __name__ == "__main__":
     time = 0
  
     q = Queue()
-    q_tempos = Queue()
-    p = Process(target=process_micro,args=(q,q_tempos,config,model),daemon=True)
+    q_tempos_color = Queue()
+    q_tempos_rotation = Queue()
+    p = Process(target=process_micro,args=(q,q_tempos_color,q_tempos_color,config,model),daemon=True)
     p.start()
 
 
@@ -313,28 +348,31 @@ if __name__ == "__main__":
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     running = True
     
-
     
-    GameColors = Colors(q_tempos)
-    RotationMatrix = Rotation_Matrix(q_tempos,clock)
+    GameColors = Colors((0, 20, 120),(90, 0, 140),q_tempos_color)
+    RotationMatrix = Rotation_Matrix(q_tempos_rotation,clock)
     Proj = Projector(WIDTH,HEIGHT)
     M = create_matrix_points(100,RADIUS,0.01)
+
+    generator_rgb_screen = generator_rgb_effect(GameColors.screen,GameColors.targetScreen,20)
     
     while running: 
         time+= DT
         flashScreenFlag = GameColors.flash_screen(time)
 
-    
-        
         if flashScreenFlag:
             time-= GameColors.tempo
-            GameColors.screen = [128,128,128]
-            
-        else:
-            GameColors.screen = [0,0,0]
+
+        try:
+            screen_color = next(generator_rgb_screen)
+        except StopIteration:
+            GameColors.screen , GameColors.targetScreen = GameColors.targetScreen,GameColors.screen
+            generator_rgb_screen = generator_rgb_effect(GameColors.screen,GameColors.targetScreen,20)
+            screen_color = next(generator_rgb_screen)
 
 
-        screen.fill(GameColors.screen)
+        
+        screen.fill(screen_color)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -357,17 +395,18 @@ if __name__ == "__main__":
                     Proj.d-=0.1
                     M = add_point(M,RADIUS)
                 case 4:
-                    Proj.scale-=100
+                    Proj.targetScale-=200
                     M = add_point(M,RADIUS)
                 case 5: 
                     M = create_matrix_points(200,RADIUS)
                 case 6:
                     M = create_matrix_points(100,RADIUS)
                 case 7:
-                    Proj.scale+=100
+                    Proj.targetScale+=200
                     M = add_point(M,RADIUS)
 
 
+        Proj.update_scale()
         GameColors.update_tempo()
         RotationMatrix.update_amount()
         RotationMatrix.add_theta()
@@ -379,7 +418,10 @@ if __name__ == "__main__":
         result = map(Proj.project,MR)
 
         for x, y in result:
-            pygame.draw.circle(screen, GameColors.dots, (x, y), 2)
+            if flashScreenFlag:
+                pygame.draw.circle(screen,GameColors.flash, (x, y), 2)
+            else:
+                pygame.draw.circle(screen,tuple(np.array([255,255,255])-np.array(screen_color)), (x, y), 2)
 
         pygame.display.flip()
         clock.tick(FRAME_LIMITS)
