@@ -17,8 +17,9 @@ class Rotation_Matrix:
         self._inverse = False
         self._amount = 0.05
         self._queue = q_tempos
-        self._k = 0.25
+        self._k = 0.25  
         self._clock = clock
+        self._tempo = [128]
 
     @property
     def matrix(self):
@@ -35,17 +36,18 @@ class Rotation_Matrix:
         self.theta += self.amount
 
     def update_amount(self):
+        
         if not self._queue.empty():
-            tempo,_ = self._queue.get()
-            if type(tempo) == np.ndarray : 
-                tempo = np.mean(tempo)
+            x,_ = self._queue.get()
+            self._tempo.append(np.squeeze(x))
             fps = self._clock.get_fps()
-            if fps == 0:
+            if fps < 20:
                 fps = 20
-            if fps > 20:
-                fps = 20
-            self.amount = ((np.pi*2*tempo)/(60*fps))*self._k
-            print(self.amount)
+
+            self.amount = ((np.pi*2*self.tempoMean)/(60*fps))*self._k
+
+            
+
 
 
     @property
@@ -55,7 +57,14 @@ class Rotation_Matrix:
     @theta.setter
     def theta(self, value):
         self._theta = float(value)
-
+    
+    @property
+    def tempo(self):
+        return self._tempo
+    
+    @tempo.setter
+    def tempo(self,value):
+        self._tempo = value
 
     @property
     def amount(self):
@@ -74,13 +83,19 @@ class Rotation_Matrix:
     def inverse(self, value):
         self._inverse = bool(value)
 
+    @property
+    def tempoMean(self):
+        return np.mean(self.tempo[-4:])
+
 class Colors:
-    def __init__(self,screen,targetScreen,q_tempos:Queue):
+    def __init__(self,screen,targetScreen,dots,targetDots,q_tempos:Queue):
         self._screen = screen
         self._targetScreen = targetScreen
         self._flash = (255,255,255)
         self._queue = q_tempos
-        self._tempo = 60/128
+        self._tempo = [60/128]
+        self._dots = dots
+        self._targetDots = targetDots
 
     @property
     def targetScreen(self):
@@ -91,12 +106,28 @@ class Colors:
         self._targetScreen = tuple(self.fix_rgb(new_screen))
 
     @property
+    def targetDots(self):
+        return self._targetDots
+    
+    @targetDots.setter
+    def targetDots(self,new_screen:list):
+        self._targetDots = tuple(self.fix_rgb(new_screen))
+
+    @property
     def screen(self):
         return tuple(self._screen)
 
     @screen.setter
     def screen(self, new_screen: list):
         self._screen = tuple(self.fix_rgb(new_screen))
+
+    @property
+    def dots(self):
+        return tuple(self._dots)
+
+    @dots.setter
+    def dots(self, new_screen: list):
+        self._dots = tuple(self.fix_rgb(new_screen))
 
     @property
     def flash(self):
@@ -114,6 +145,10 @@ class Colors:
     def tempo(self,value):
         self._tempo = value
 
+    @property
+    def tempoMean(self):
+        return np.mean(self.tempo[-4:])
+
     @staticmethod
     def fix_rgb(values):
         for i in range(3):
@@ -125,17 +160,17 @@ class Colors:
         return values
 
     def flash_screen(self,value):
-        if self.tempo <= value and self.tempo != 0:
-            return True
 
-        return False
+        if self.tempoMean<= value:
+            return True
+        else:
+            return False
     
     def update_tempo(self):
         if not self._queue.empty():
             x,_ = self._queue.get()
             x = float(np.squeeze(x))
-            
-            self.tempo = 60/x
+            self._tempo.append(60/x)
             
 
 
@@ -314,8 +349,6 @@ def process_micro(q,q_tempos_color,q_tempos_rotation,config: dict, model):
 
         res = model.predict(x)
 
-        print(res)
-
         q.put(np.argmax(res))
 
 
@@ -338,7 +371,7 @@ if __name__ == "__main__":
     q = Queue()
     q_tempos_color = Queue()
     q_tempos_rotation = Queue()
-    p = Process(target=process_micro,args=(q,q_tempos_color,q_tempos_color,config,model),daemon=True)
+    p = Process(target=process_micro,args=(q,q_tempos_color,q_tempos_rotation,config,model),daemon=True)
     p.start()
 
 
@@ -349,19 +382,23 @@ if __name__ == "__main__":
     running = True
     
     
-    GameColors = Colors((0, 20, 120),(90, 0, 140),q_tempos_color)
+    GameColors = Colors((0, 0, 0),(40, 40, 40),(200,200,200),(255,255,255),q_tempos_color)
     RotationMatrix = Rotation_Matrix(q_tempos_rotation,clock)
     Proj = Projector(WIDTH,HEIGHT)
     M = create_matrix_points(100,RADIUS,0.01)
 
     generator_rgb_screen = generator_rgb_effect(GameColors.screen,GameColors.targetScreen,20)
+    generator_rgb_dots = generator_rgb_effect(GameColors.dots,GameColors.targetDots,20)
+
     
     while running: 
         time+= DT
         flashScreenFlag = GameColors.flash_screen(time)
 
+        
+
         if flashScreenFlag:
-            time-= GameColors.tempo
+            time-= GameColors.tempoMean
 
         try:
             screen_color = next(generator_rgb_screen)
@@ -369,6 +406,15 @@ if __name__ == "__main__":
             GameColors.screen , GameColors.targetScreen = GameColors.targetScreen,GameColors.screen
             generator_rgb_screen = generator_rgb_effect(GameColors.screen,GameColors.targetScreen,20)
             screen_color = next(generator_rgb_screen)
+
+        try:
+            dots_color = next(generator_rgb_dots)
+        except StopIteration:
+            GameColors.dots , GameColors.targetDots = GameColors.targetDots,GameColors.dots
+            generator_rgb_dots = generator_rgb_effect(GameColors.dots,GameColors.targetDots,20)
+            dots_color = next(generator_rgb_dots)
+
+        
 
 
         
@@ -419,9 +465,9 @@ if __name__ == "__main__":
 
         for x, y in result:
             if flashScreenFlag:
-                pygame.draw.circle(screen,GameColors.flash, (x, y), 2)
+                pygame.draw.circle(screen,np.array(dots_color)*0.5, (x, y), 2)
             else:
-                pygame.draw.circle(screen,tuple(np.array([255,255,255])-np.array(screen_color)), (x, y), 2)
+                pygame.draw.circle(screen,dots_color, (x, y), 2)
 
         pygame.display.flip()
         clock.tick(FRAME_LIMITS)
