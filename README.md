@@ -1,5 +1,30 @@
  # AUDIO-PROJECT
- ___
+ 
+
+## Objective
+
+The main objective of this project is to understand how deep learning techniques can be applied to audio data.
+The core idea is to develop a guitar sound classifier, which will later be integrated into a reactive background game built with Pygame.
+
+This project serves both as an exploration of audio machine learning pipelines and as a foundation for real-time interactive applications.
+
+## Learning Outcomes
+
+Through this project, the following concepts and tools are being explored:
+
+- Librosa for audio processing and feature extraction
+- Mel Spectrograms for audio representation
+- Convolutional Neural Networks (CNNs) applied to audio classification
+- Design and implementation of an audio processing pipeline
+- Basic Mlflow
+
+---
+
+## V1
+
+[![Watch the video](https://img.youtube.com/vi/a2ASOuAzIFo/0.jpg)](https://www.youtube.com/watch?v=a2ASOuAzIFo)
+
+
 
 
 
