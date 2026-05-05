@@ -13,6 +13,7 @@ from keras import regularizers
 from multiprocessing import Pool,cpu_count
 from audio_pipeline import clean_x
 from functools import partial
+from transform import VIT
 
 
 def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flow_url:str = "http://localhost:5000",experiment_name = "AUDIO_CNN"):
@@ -23,7 +24,14 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
     parameters = import_parameters(config_path)
     config = import_config(config_path)
     train_dataset,val_dataset,n_label,input_shape,valTest_df = main_process(data_path)
-    model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"],parameters["type_of_regulizer"])
+    if config["model"] == "conv":
+        model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"],parameters["type_of_regulizer"])
+    elif config["model"] == "VIT":
+        model = VIT(8,8,8,8)
+        model.compile(loss= "categorical_crossentropy",optimizer= "adam",metrics= ["acc"])
+        model.summary()
+
+    
 
     testing_x = valTest_df[0]
     testing_y = valTest_df[1]
