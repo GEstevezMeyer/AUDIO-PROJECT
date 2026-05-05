@@ -10,7 +10,7 @@ class Rotation_Matrix:
         self._queue = q_tempos
         self._k = 0.2  
         self._clock = clock
-        self._tempo = [128]
+        self._tempo = [90]
 
     @property
     def matrix(self):
@@ -84,7 +84,7 @@ class Colors:
         self._targetScreen = targetScreen
         self._flash = (255,255,255)
         self._queue = q_tempos
-        self._tempo = [60/128]
+        self._tempo = [60/90]
         self._dots = dots
         self._targetDots = targetDots
 
@@ -161,7 +161,8 @@ class Colors:
         if not self._queue.empty():
             x,_ = self._queue.get()
             x = float(np.squeeze(x))
-            self._tempo.append(60/x)
+            if x != 0:
+                self._tempo.append(60/x)
             
 
 

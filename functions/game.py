@@ -17,7 +17,16 @@ def generator_rgb_effect(start_color:list , end_color:list,steps:int):
         yield (r[i],g[i],b[i])
 
 
-    
+def create_lines_effect(amount_lines:int,height,width):
+    res = []
+    for i in range(amount_lines): 
+        start = (np.random.uniform(0,width),0)
+        end = (np.random.uniform(0,width),height)
+        res.append((start,end))
+
+    return res
+        
+
 
 def create_random_point(radius:float,noise_bias:float = 0.05) -> tuple: 
     z = np.random.uniform(-radius,radius)
@@ -57,7 +66,8 @@ def create_microfone_object(config):
         channels=1,
         rate=RATE,
         input=True,
-        frames_per_buffer=CHUNK
+        frames_per_buffer=CHUNK,
+        input_device_index=2
     )
 
 
@@ -118,22 +128,36 @@ def process_micro(q,q_tempos_color,q_tempos_rotation,config: dict, model):
 
         res = model.predict(x)
 
+        print(res)
+
         q.put(np.argmax(res))
+
+def is_in_the_circle(x,y,center,radius): 
+    xc , yc = center
+    return (x-xc)**2 + (y-yc)**2 <= radius**2
 
 
 
 
 if __name__ == "__main__":
+    p = pyaudio.PyAudio()
+
+    for i in range(p.get_device_count()):
+        info = p.get_device_info_by_index(i)
+
+        print("INDEX:", i)
+        print("NAME :", info["name"])
+        print("INPUT CHANNELS:", info["maxInputChannels"])
+        print("OUTPUT CHANNELS:", info["maxOutputChannels"])
+        print()
 
     mlflow.set_tracking_uri("http://localhost:5000")
 
     config = import_config("functions/config.toml")
     model = mlflow.pyfunc.load_model(
-        "models:/m-84367e9851634dcfb484ce4d1742e2e8"
+        "models:/m-0dd9b997cf1f41b9b3cb6213ac91bd79"
     )
 
-    WIDTH = 800
-    HEIGHT = 600
     RADIUS = 2
     FRAME_LIMITS = 20
     DT = 1/FRAME_LIMITS
@@ -147,13 +171,20 @@ if __name__ == "__main__":
 
 
     pygame.init()
+
+    info = pygame.display.Info()
    
+    WIDTH = info.current_w
+    HEIGHT = info.current_h
+
+    CENTER = (WIDTH//2, HEIGHT//2)
+
     clock = pygame.time.Clock()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     running = True
     
     
-    GameColors = Colors((0, 0, 0),(40, 40, 40),(200,200,200),(255,255,255),q_tempos_color)
+    GameColors = Colors((0, 0, 0),(40, 40, 40),(0,200,0),(255,255,255),q_tempos_color)
     RotationMatrix = Rotation_Matrix(q_tempos_rotation,clock)
     Proj = Projector(WIDTH,HEIGHT)
     M = create_matrix_points(100,RADIUS,0.01)
@@ -161,12 +192,13 @@ if __name__ == "__main__":
     generator_rgb_screen = generator_rgb_effect(GameColors.screen,GameColors.targetScreen,20)
     generator_rgb_dots = generator_rgb_effect(GameColors.dots,GameColors.targetDots,20)
 
+    state_drawing = "circle"
+    n_lines = 4
     
     while running: 
         time+= DT
         flashScreenFlag = GameColors.flash_screen(time)
 
-        
 
         if flashScreenFlag:
             time-= GameColors.tempoMean
@@ -187,9 +219,11 @@ if __name__ == "__main__":
 
         
 
-
         
         screen.fill(screen_color)
+
+        pygame.draw.circle(screen,np.array(screen_color)*0.5, CENTER ,40)
+
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -215,9 +249,13 @@ if __name__ == "__main__":
                     Proj.targetScale-=200
                     M = add_point(M,RADIUS)
                 case 5: 
-                    M = create_matrix_points(200,RADIUS)
+                    state_drawing = "circle"
+                    if n_lines <= 20:
+                        n_lines+= 5
                 case 6:
-                    M = create_matrix_points(100,RADIUS)
+                    state_drawing = "rectangle"
+                    if n_lines >= 10:
+                        n_lines-= 5
                 case 7:
                     Proj.targetScale+=200
                     M = add_point(M,RADIUS)
@@ -234,11 +272,28 @@ if __name__ == "__main__":
     
         result = map(Proj.project,MR)
 
+        if flashScreenFlag:
+            effect_thunder = create_lines_effect(n_lines,HEIGHT,WIDTH)
+    
+            for start_position,end_position in effect_thunder: 
+                pygame.draw.line(screen,np.array(dots_color)*0.5, start_position,end_position, 1)
+
         for x, y in result:
+            if is_in_the_circle(x,y,CENTER,40):
+                continue
+
             if flashScreenFlag:
-                pygame.draw.circle(screen,np.array(dots_color)*0.5, (x, y), 2)
+                if state_drawing == "circle":
+                    pygame.draw.circle(screen,np.array(dots_color)*0.25, (x, y), 2)
+                elif state_drawing == "rectangle": 
+                    pygame.draw.rect(screen,np.array(dots_color)*0.25 , (x, y,2,2))
             else:
-                pygame.draw.circle(screen,dots_color, (x, y), 2)
+                if state_drawing == "circle":
+                    pygame.draw.circle(screen,dots_color, (x, y),2)
+                elif state_drawing == "rectangle": 
+                    pygame.draw.rect(screen,dots_color,(x,y,2,2))
+
+
 
         pygame.display.flip()
         clock.tick(FRAME_LIMITS)
