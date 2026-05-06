@@ -45,7 +45,10 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
     testing_y = valTest_df[1]
 
     print("Testing:")
-    print(testing_x.shape)
+    if config["model"] != "double":
+        print(testing_x.shape)
+    else:
+        print(f"x1:{testing_x[1].shape} x2: {testing_x[0].shape}")
     print(testing_y.shape)
 
     with mlflow.start_run(): 
@@ -197,6 +200,5 @@ def compute_testing_accuracy(testing_dataset: np.array, testing_label: np.array,
 
   
 if __name__ == "__main__":  
-    model = create_double_model((40, 94, 1),(40, 94, 1),8)
     model,_ = main_training("DATA/GUITAR")
     

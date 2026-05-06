@@ -3,12 +3,12 @@ model = "double"
 target_length = 48000
 nfft = 1024
 hop_length = 512
-nmels = 40
+nmels = 64
 batch_size = 32
 divide_4 = false 
 [parameters]
-epochs = 10
-number_of_conv_layers = 3
+epochs = 20
+number_of_conv_layers = 4
 filter_start = 4
 step_size = 8
 max_pooling = true

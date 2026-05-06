@@ -9,6 +9,7 @@ from audio_pipeline import enveloppe,pad_waveform
 from classes import *
 
 
+
 def generator_rgb_effect(start_color:list , end_color:list,steps:int):
     r = np.linspace(start_color[0],end_color[0],steps)
     g = np.linspace(start_color[1],end_color[1],steps)
@@ -27,6 +28,12 @@ def create_lines_effect(amount_lines:int,height,width):
     return res
         
 
+def clean_x(x:np.ndarray) -> np.ndarray:
+
+    x = (x-x.min())/(x.max()-x.min())
+    x = x.reshape(1,x.shape[0],x.shape[1],1)
+
+    return x 
 
 def create_random_point(radius:float,noise_bias:float = 0.05) -> tuple: 
     z = np.random.uniform(-radius,radius)
@@ -117,14 +124,23 @@ def process_micro(q,q_tempos_color,q_tempos_rotation,config: dict, model):
         
         mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
-        x = mel_spectrogram
-        x_min = x.min()
-        x_max = x.max()
-
-        x = (x - x_min) / (x_max - x_min)
-        x = x.reshape(1, x.shape[0], x.shape[1], 1)
-
         
+
+        x1 = clean_x(mel_spectrogram)
+       
+
+        if config["model"] == "double":
+            mfcc = librosa.feature.mfcc(
+                y=waveform,
+                sr=16000,
+                n_mfcc=config["nmels"]
+            )
+
+            x2 = clean_x(mfcc)
+            x = (x1,x2)
+        
+        else:
+            x = x1
 
         res = model.predict(x)
 
@@ -155,7 +171,7 @@ if __name__ == "__main__":
 
     config = import_config("functions/config.toml")
     model = mlflow.pyfunc.load_model(
-        "models:/m-0dd9b997cf1f41b9b3cb6213ac91bd79"
+        "models:/m-030f7cc2b8884929befdd77e67199b61"
     )
 
     RADIUS = 2
