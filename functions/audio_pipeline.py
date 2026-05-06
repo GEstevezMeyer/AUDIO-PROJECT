@@ -32,32 +32,44 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     with Pool(cpu_count()) as p:
         res = p.map(func, metadata.to_dict("records"))
     
-    x, y, split = zip(*res)
+    x1,x2, y, split = zip(*res)
     n_label = len(list(set(y))) 
 
-    x = np.array(x)
+    x1 = np.array(x1)
+    x2 = np.array(x2)
     y = np.array(y)
     split = np.array(split)
 
     if config["divide_4"] == True: 
-        x,y,split = divide_data(x,y,split)
+        x1,y,split = divide_data(x1,y,split)
 
-    input_shape = (x.shape[1],x.shape[2],1)
+    input_shape1 = (x1.shape[1],x1.shape[2],1)
+    input_shape2 = (x2.shape[1],x2.shape[2],1)
 
     train_mask = split == "TRAINING"
     test_mask  = split == "TEST"
     valTrue_mask = split == "VAL_REAL"
 
-    x_train = x[train_mask]
-    x_test = x[test_mask]
-    x_valTrue = x[valTrue_mask]
+    x1_train = x1[train_mask]
+    x1_test = x1[test_mask]
+    x1_valTrue = x1[valTrue_mask]
 
-    x = (x_train,x_test,x_valTrue)
+    x2_train = x2[train_mask]
+    x2_test = x2[test_mask]
+    x2_valTrue = x2[valTrue_mask]
+
+    x1 = (x1_train,x1_test,x1_valTrue)
+    x2 = (x2_train,x2_test,x2_valTrue)
 
     with Pool(3) as p:
-        res = p.map(clean_x, x)
+        res = p.map(clean_x, x1)
+    
+    x1_train,x1_test,x1_valTrue = res
 
-    x_train,x_test,x_valTrue = res
+    with Pool(3) as p:
+        res = p.map(clean_x, x2)
+    
+    x2_train,x2_test,x2_valTrue = res
 
     y_train = y[train_mask]
     y_test = y[test_mask]
@@ -71,23 +83,43 @@ def main_process(directory_intrument:str,config_path:str = "functions/config.tom
     y_test,y_train,y_valTrue = res
 
     print("training")
-    print(y_train.shape,x_train.shape)
+    print(y_train.shape,x1_train.shape)
 
-    valTesting_df = (x_valTrue,y_valTrue)
+    valTesting_df = (x1_valTrue,y_valTrue)
+
+    valTesting_double_df = ((x1_valTrue,x2_valTrue),y_valTrue)
      
-
-    train_ds = tf.data.Dataset.from_tensor_slices((list(x_train), list(y_train)))
-    test_ds  = tf.data.Dataset.from_tensor_slices((list(x_test), list(y_test)))
+    train_ds = tf.data.Dataset.from_tensor_slices((list(x1_train), list(y_train)))
+    test_ds  = tf.data.Dataset.from_tensor_slices((list(x1_test), list(y_test)))
 
     train_ds = train_ds.shuffle(buffer_size=1000).batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
     test_ds = test_ds.batch(config["batch_size"]).prefetch(tf.data.AUTOTUNE)
 
-    
-    print(input_shape)
 
+    train_double_ds = tf.data.Dataset.from_tensor_slices(
+        ((x1_train, x2_train), y_train)
+    )
+
+    test_double_ds = tf.data.Dataset.from_tensor_slices(
+        ((x1_test, x2_test), y_test)
+    )
+
+    train_double_ds = train_double_ds.shuffle(1000)\
+        .batch(config["batch_size"])\
+        .prefetch(tf.data.AUTOTUNE)
+
+    test_double_ds = test_double_ds.batch(config["batch_size"])\
+        .prefetch(tf.data.AUTOTUNE)
+        
+    print(input_shape1)
+    print(input_shape2)
 
     os.chdir("../../")
-    return train_ds,test_ds,n_label,input_shape,valTesting_df
+
+    if config["model"] == "double":
+        return train_double_ds,test_double_ds,n_label,input_shape1,input_shape2,valTesting_double_df
+    else:
+        return train_ds,test_ds,n_label,input_shape1,valTesting_df
 
 
 def load_metadata() -> pd.DataFrame: 
@@ -170,14 +202,21 @@ def load_wavefile(series:dict,config:dict):
 
     mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
 
-    x = mel_spectrogram
+    mfcc = librosa.feature.mfcc(
+            y=waveform,
+            sr=sample_rate,
+            n_mfcc=config["nmels"]
+    )
+
+    x1 = mel_spectrogram
+    x2 = mfcc
     y = series["label"]
     split = series["Split"]
 
 
 
     
-    return x,y,split 
+    return x1,x2,y,split
 
 
 

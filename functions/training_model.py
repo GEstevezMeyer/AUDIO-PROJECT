@@ -23,13 +23,21 @@ def main_training(data_path:str,config_path:str = "functions/config.toml",ml_flo
 
     parameters = import_parameters(config_path)
     config = import_config(config_path)
-    train_dataset,val_dataset,n_label,input_shape,valTest_df = main_process(data_path)
+    if config["model"] == "double":
+        train_dataset,val_dataset,n_label,input_shape1,input_shape2,valTest_df = main_process(data_path)
+    else:
+        train_dataset,val_dataset,n_label,input_shape,valTest_df = main_process(data_path)
+
     if config["model"] == "conv":
         model = create_conv_model(input_shape,n_label,parameters["number_of_conv_layers"],parameters["filter_start"],parameters["step_size"],parameters["max_pooling"],parameters["type_of_regulizer"])
     elif config["model"] == "VIT":
         model = VIT(8,8,8,8)
         model.compile(loss= "categorical_crossentropy",optimizer= "adam",metrics= ["acc"])
         model.summary()
+
+    elif config["model"] == "double":
+        model = create_double_model(input_shape1,input_shape2,n_label,parameters["filter_start"],parameters["number_of_conv_layers"],
+                                    parameters["step_size"])
 
     
 
@@ -95,6 +103,37 @@ def create_conv_model(input_shape:tuple,number_of_label:int,number_of_conv_layer
 
     return model 
 
+
+
+
+def create_double_model(input_shape1:tuple,input_shape2:tuple,number_of_label:int,filter_start:int = 16,number_of_conv_layer:int = 3,step_size:int = 8):
+    input1 = tf.keras.layers.Input(shape= input_shape1)
+    input2 = tf.keras.layers.Input(shape =input_shape2)
+
+    x1 = tf.keras.layers.Conv2D(filter_start,(3,3), activation="relu", strides=(1,1), padding="same")(input1)
+    x2 = tf.keras.layers.Conv2D(filter_start,(3,3), activation="relu", strides=(1,1), padding="same")(input2)
+
+    for i in range(0,number_of_conv_layer):
+        filters = filter_start + i*step_size
+        x1 = tf.keras.layers.Conv2D(filters,(3,3),activation="relu", strides=(1,1), padding="same")(x1)
+        x2 = tf.keras.layers.Conv2D(filters,(3,3),activation="relu", strides=(1,1), padding="same")(x2)
+
+    layer_concatenate = tf.keras.layers.concatenate([x1,x2])
+
+    x = tf.keras.layers.MaxPool2D((2,2))(layer_concatenate)
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(32,activation="relu")(x)
+    x = tf.keras.layers.Dense(number_of_label, activation="softmax")(x)
+
+    model = tf.keras.Model(inputs = [input1,input2], outputs = x)
+
+    model.compile(loss= "categorical_crossentropy",optimizer= "adam",metrics= ["acc"])
+
+    model.summary()
+
+    return model 
+
+
 def import_parameters(path:str) -> dict: 
     with open(path, "rb") as r:
         config = tomllib.load(r)["parameters"]
@@ -158,5 +197,6 @@ def compute_testing_accuracy(testing_dataset: np.array, testing_label: np.array,
 
   
 if __name__ == "__main__":  
+    model = create_double_model((40, 94, 1),(40, 94, 1),8)
     model,_ = main_training("DATA/GUITAR")
     

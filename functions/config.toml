@@ -1,5 +1,5 @@
 [config]
-model = "VIT"
+model = "double"
 target_length = 48000
 nfft = 1024
 hop_length = 512
@@ -7,8 +7,8 @@ nmels = 40
 batch_size = 32
 divide_4 = false 
 [parameters]
-epochs = 100
-number_of_conv_layers = 4
+epochs = 10
+number_of_conv_layers = 3
 filter_start = 4
 step_size = 8
 max_pooling = true
