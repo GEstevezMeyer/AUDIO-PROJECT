@@ -25,7 +25,7 @@ Through this project, the following concepts and tools are being explored:
 [![Watch the video](https://img.youtube.com/vi/a2ASOuAzIFo/0.jpg)](https://www.youtube.com/watch?v=a2ASOuAzIFo)
 
 
-## V1
+## V2
 
 [![Watch the video](https://img.youtube.com/vi/O-QPPLyBehk/0.jpg)](https://www.youtube.com/watch?v=O-QPPLyBehk)
 
